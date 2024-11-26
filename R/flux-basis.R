@@ -181,7 +181,12 @@ write_basis_runs <- function(basis_runs, base_directory, optimise = TRUE) {
   output <- NULL
   for (basis_function in basis$basis_functions) {
     scaling_grid <- basis_function$scaling_grid
-    has_time_grid <- 'time' %in% names(dimnames(scaling_grid))
+    if (inherits(scaling_grid, 'rle_grid_data')) {
+      scaling_grid_dimnames <- attr(scaling_grid, 'dimension_names')
+    } else {
+      scaling_grid_dimnames <- dimnames(scaling_grid)
+    }
+    has_time_grid <- 'time' %in% names(scaling_grid_dimnames)
     value <- if (has_time_grid) {
       min(attr(scaling_grid, 'time'))
     } else {
