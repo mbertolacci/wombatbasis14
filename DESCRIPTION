@@ -1,0 +1,27 @@
+Package: wombatbasis14
+Title: Construct flux basis functions and run them through an atmospheric transport model
+Version: 0.0.0.1
+Authors@R: 
+    person(given = "Michael",
+           family = "Bertolacci",
+           role = c("aut", "cre"),
+           email = "m.bertolacci@gmail.com",
+           comment = c(ORCID = "0000-0003-0317-5941"))
+Description: Construct flux basis functions and run them through an atmospheric transport model.
+License: MIT + file LICENSE
+Encoding: UTF-8
+LazyData: true
+Imports:
+    ncdf4,
+    lubridate,
+    Matrix,
+    logger,
+    parallel,
+    yaml,
+    glue,
+    Rcpp
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.1
+LinkingTo: 
+    Rcpp,
+    RcppEigen
