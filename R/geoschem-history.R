@@ -44,6 +44,7 @@ print.geoschem_history <- function(x, ...) {
 #' @export
 geoschem_history_collection <- function(
   name,
+  filename = NULL,
   template = '%y4%m2%d2_%h2%n2z.nc4',
   format = 'CFIO',
   frequency,
@@ -55,6 +56,7 @@ geoschem_history_collection <- function(
 
   structure(list(
     name = name,
+    filename = filename,
     template = template,
     format = format,
     frequency = frequency,
@@ -68,14 +70,19 @@ geoschem_history_collection <- function(
 as.character.geoschem_history_collection <- function(x, .envir = parent.frame(), ...) {
   x_glued <- .glue_recursive(x, .envir)
   sprintf(
-    "%1$s.template: '%2$s',
-%1$s.format: '%3$s',
-%1$s.frequency: %4$s,
-%1$s.duration: %5$s,
-%1$s.mode: '%6$s',
-%1$s.fields: %7$s,",
+    "%1$s.%2$s: '%3$s',
+%1$s.format: '%4$s',
+%1$s.frequency: %5$s,
+%1$s.duration: %6$s,
+%1$s.mode: '%7$s',
+%1$s.fields: %8$s,",
     x$name,
-    x_glued$template,
+    if (!is.null(x_glued$filename)) {
+      'filename'
+    } else {
+      'template'
+    },
+    x_glued[[if (!is.null(x_glued$filename)) 'filename' else 'template']],
     x_glued$format,
     x_glued$frequency,
     x_glued$duration,
