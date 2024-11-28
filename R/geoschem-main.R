@@ -153,9 +153,11 @@ geoschem_transport_settings <- function(
   transported_species
 ) {
   structure(list(
-    activate = activate,
-    fill_negative_values = fill_negative_values,
-    iord_jord_kord = iord_jord_kord,
+    gcclassic_tpcore = list(
+      activate = activate,
+      fill_negative_values = fill_negative_values,
+      iord_jord_kord = iord_jord_kord
+    ),
     transported_species = transported_species
   ), class = c('geoschem_transport_settings', 'geoschem_main_settings_part'))
 }
