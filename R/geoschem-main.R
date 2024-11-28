@@ -149,7 +149,7 @@ as.list.geoschem_timesteps_settings <- function(x, .envir = parent.frame(), ...)
 geoschem_transport_settings <- function(
   activate = TRUE,
   fill_negative_values = TRUE,
-  iord_jord_kord = c(3, 3, 7),
+  iord_jord_kord = c(3L, 3L, 7L),
   transported_species
 ) {
   structure(list(
