@@ -1,7 +1,38 @@
 #' @export
+flux_field <- function(
+  name,
+  source_file,
+  source_variable,
+  source_time,
+  cre,
+  source_dimension,
+  source_unit,
+  multiply_by = 1
+) {
+  structure(list(
+    name = name,
+    source_file = source_file,
+    source_variable = source_variable,
+    source_time = source_time,
+    cre = cre,
+    source_dimension = source_dimension,
+    source_unit = source_unit,
+    multiply_by = multiply_by
+  ), class = 'flux_field')
+}
+
+#' @export
+print.flux_field <- function(x, ...) {
+  cat(sprintf('flux_field with name "%s"', x$name))
+}
+
+#' @export
 flux_basis <- function(
   structure,
+  start_time,
+  end_time,
   basis_parts,
+  flux_fields,
   factor_grids,
   use_mclapply = FALSE,
   ...
@@ -17,9 +48,68 @@ flux_basis <- function(
   part_names <- sapply(basis_parts, getElement, 'name')
   stopifnot(length(unique(part_names)) == length(part_names))
 
+  # Check that all fields used in basis parts are present in flux_fields
+  flux_field_names <- sapply(flux_fields, getElement, 'name')
+  stopifnot(all(sapply(
+    basis_parts,
+    function(basis_part) {
+      all(basis_part$fields %in% flux_field_names)
+    }
+  )))
+
   lapply_fn <- if (use_mclapply) parallel::mclapply else lapply
 
-  basis_functions <- do.call(c, lapply_fn(basis_parts, function(basis_part) {
+  all_factor_grid_combinations <- do.call(rbind, lapply(basis_parts, function(basis_part) {
+    if (length(basis_part$factor_grid_names) == 0) {
+      return(NULL)
+    }
+    output <- expand.grid(lapply(
+      factor_grids,
+      names
+    )[basis_part$factor_grid_names])
+    for (factor_grid_name in names(factor_grids)) {
+      if (is.null(output[[factor_grid_name]])) {
+        output[[factor_grid_name]] <- NA
+      }
+    }
+    as.matrix(output)
+  }))
+  factor_grid_combinations <- unique(all_factor_grid_combinations)
+  
+  scaling_grids <- lapply_fn(seq_len(nrow(factor_grid_combinations)), function(i) {
+    factor_grid_combination_long <- factor_grid_combinations[i, ]
+    factor_grid_combination <- factor_grid_combination_long[!is.na(factor_grid_combination_long)]
+    factor_grid_names <- names(factor_grid_combination)
+
+    basis_function_factor_grids <- lapply(
+      factor_grid_names,
+      function(name) {
+        factor_grids[[name]][[
+          factor_grid_combination[name]
+        ]]
+      }
+    )
+    value <- encode_rle_grid(.truncate_grid_times(
+      multiply_grids(basis_function_factor_grids),
+      start = TRUE,
+      end = FALSE
+    ))
+    list(
+      name = paste0(sprintf(
+        '%s%s',
+        factor_grid_names,
+        factor_grid_combination
+      ), collapse = '_'),
+      source_time = .scaling_grid_source_time(value),
+      cre = .scaling_grid_cre(value),
+      value = value
+    )
+  }, ...)
+
+  scaling_grids_by_name <- scaling_grids
+  names(scaling_grids_by_name) <- sapply(scaling_grids, getElement, 'name')
+
+  basis_functions <- do.call(c, lapply(basis_parts, function(basis_part) {
     if (length(basis_part$factor_grid_names) == 0) {
       return(list(
         part_name = basis_part$name,
@@ -47,45 +137,93 @@ flux_basis <- function(
         }
       )
 
-      scaling_grid <- encode_rle_grid(.truncate_grid_times(
-        multiply_grids(basis_function_factor_grids),
-        start = TRUE,
-        end = FALSE
-      ))
+      scaling_grid_name <- paste0(sprintf(
+        '%s%s',
+        factor_grid_names,
+        factor_grid_combination
+      ), collapse = '_')
 
       list(
         name = sprintf(
           '%s_%s',
           basis_part$name,
-          paste0(sprintf(
-            '%s%s',
-            factor_grid_names,
-            factor_grid_combination
-          ), collapse = '_')
+          scaling_grid_name
         ),
-        part = basis_part$name,
-        scaling_grid = scaling_grid,
-        fields = basis_part$fields
+        flux_field_names = basis_part$fields,
+        scaling_grid_name = scaling_grid_name,
+        start_time = .scaling_grid_start_time(
+          scaling_grids_by_name[[scaling_grid_name]]$value,
+          start_time
+        ),
+        end_time = end_time
       )
     })
-  }, ...))
+  }))
 
   structure(list(
-    basis_parts = basis_parts,
-    factor_grids = factor_grids,
-    basis_functions = basis_functions
+    flux_fields = flux_fields,
+    basis_functions = basis_functions,
+    scaling_grids = scaling_grids
   ), class = 'flux_basis')
 }
 
 #' @export
 print.flux_basis <- function(x, ...) {
   cat(sprintf(  
-    'flux_basis with basis functions:\n%s',
-    paste(
-      paste0('- ', sapply(x$basis_parts, getElement, 'name')),
-      collapse = '\n'
-    )
+    'flux_basis with %d scaling grids across %d basis functions\n',
+    length(x$scaling_grids),
+    length(x$basis_functions)
   ))
+}
+
+#' @export
+write_flux_basis <- function(flux_basis, base_directory) {
+  dir.create(base_directory, recursive = TRUE, showWarnings = FALSE)
+
+  get_scaling_grid_path <- function(scaling_grid) {
+    sprintf('%s.nc', file.path(base_directory, 'scaling-grids', scaling_grid$name))
+  }
+
+  output_yaml <- list(
+    flux_fields = flux_basis$flux_fields,
+    basis_functions = lapply(flux_basis$basis_functions, function(basis_function) {
+      basis_function$start_time <- format(basis_function$start_time, '%Y-%m-%d %H:%M:%S')
+      basis_function$end_time <- format(basis_function$end_time, '%Y-%m-%d %H:%M:%S')
+      basis_function
+    }),
+    scaling_grids = lapply(flux_basis$scaling_grids, function(scaling_grid) {
+      scaling_grid$value <- NULL
+      scaling_grid$source_file <- get_scaling_grid_path(scaling_grid)
+      scaling_grid$source_variable <- 'value'
+      scaling_grid
+    })
+  )
+  yaml::write_yaml(output_yaml, file.path(base_directory, 'flux-basis.yaml'))
+
+  dir.create(file.path(base_directory, 'scaling-grids'), recursive = TRUE, showWarnings = FALSE)
+  for (scaling_grid in flux_basis$scaling_grids) {
+    write_nc_grid_data(
+      scaling_grid$value,
+      get_scaling_grid_path(scaling_grid)
+    )
+  }
+}
+
+#' @export
+read_flux_basis <- function(path) {
+  output <- yaml::read_yaml(path)
+  output$flux_fields <- lapply(output$flux_fields, function(flux_field_input) {
+    do.call(flux_field, flux_field_input)
+  })
+  start_times_str <- sapply(output$basis_functions, getElement, 'start_time')
+  start_times <- ymd_hms(start_times_str)
+  end_times_str <- sapply(output$basis_functions, getElement, 'end_time')
+  end_times <- ymd_hms(end_times_str)
+  for (i in seq_along(output$basis_functions)) {
+    output$basis_functions[[i]]$start_time <- start_times[i]
+    output$basis_functions[[i]]$end_time <- end_times[i]
+  }
+  output
 }
 
 .basis_parts_from_structure <- function(structure) {
@@ -124,92 +262,41 @@ print.flux_basis <- function(x, ...) {
   }
 }
 
-#' @export
-basis_to_runs <- function(
-  basis,
-  base_run,
-  max_run_length,
-  postprocess_run,
-  postprocess_split_run,
-  ...
-) {
-  runs <- .basis_to_runs_tracer_transport(basis, base_run, ...)
-
-  if (!missing(postprocess_run)) {
-    runs <- lapply(runs, postprocess_run)
+.scaling_grid_start_time <- function(grid, default_start_time) {
+  if (inherits(grid, 'rle_grid_data')) {
+    grid_dimnames <- attr(grid, 'dimension_names')
+  } else {
+    grid_dimnames <- dimnames(grid)
   }
-
-  if (!missing(max_run_length)) {
-    # NOTE(mgnb): the base run is excluded from the split
-    runs <- c(
-      runs[1],
-      do.call(c, lapply(
-        runs[2 : length(runs)],
-        .split_run_by_period,
-        max_run_length
-      ))
-    )
+  has_time_grid <- 'time' %in% names(grid_dimnames)
+  if (has_time_grid) {
+    min(attr(grid, 'time'))
+  } else {
+    default_start_time
   }
-
-  if (!missing(postprocess_split_run)) {
-    runs <- lapply(runs, postprocess_split_run)
-  }
-
-  runs
 }
 
-#' @export
-write_basis_runs <- function(basis_runs, base_directory, optimise = TRUE) {
-  for (basis_run in basis_runs) {
-    logger::log_debug('Writing {basis_run$name}')
-    path <- file.path(base_directory, basis_run$name)
-    if (optimise) {
-      basis_run$configuration$hemco$base_emissions <- optimise_base_emissions(
-        basis_run$configuration$hemco$base_emissions
-      )
-    }
-    write_geoschem_run(basis_run$configuration, path)
+.scaling_grid_source_time <- function(grid) {
+  if (inherits(grid, 'rle_grid_data')) {
+    grid_dimnames <- attr(grid, 'dimension_names')
+  } else {
+    grid_dimnames <- dimnames(grid)
   }
-  write.csv(
-    unique(do.call(rbind, lapply(basis_runs, getElement, 'mapping'))),
-    file.path(base_directory, 'mapping.csv'),
-    row.names = FALSE
-  )
-}
+  has_time_grid <- 'time' %in% names(grid_dimnames)
 
-.basis_function_start_times <- function(basis, base_run) {
-  output <- NULL
-  for (basis_function in basis$basis_functions) {
-    scaling_grid <- basis_function$scaling_grid
-    if (inherits(scaling_grid, 'rle_grid_data')) {
-      scaling_grid_dimnames <- attr(scaling_grid, 'dimension_names')
-    } else {
-      scaling_grid_dimnames <- dimnames(scaling_grid)
-    }
-    has_time_grid <- 'time' %in% names(scaling_grid_dimnames)
-    value <- if (has_time_grid) {
-      min(attr(scaling_grid, 'time'))
-    } else {
-      base_run$main$simulation$start_date
-    }
-    if (is.null(output)) {
-      output <- value
-    } else {
-      output <- c(output, value)
-    }
+  if (!has_time_grid) {
+    return('2000/1/1/0')
   }
-  output
-}
 
-.times_to_hemco_source_time <- function(x) {
-  minutes <- lubridate::minute(x)
+  times <- attr(grid, 'time')
+  minutes <- lubridate::minute(times)
   if (any(minutes != 0)) {
     '*'
   } else {
-    years <- lubridate::year(x)
-    months_vary <- any(lubridate::month(x) != 1)
-    days_vary <- any(lubridate::day(x) != 1)
-    hours_vary <- any(lubridate::hour(x) != 0)
+    years <- lubridate::year(times)
+    months_vary <- any(lubridate::month(times) != 1)
+    days_vary <- any(lubridate::day(times) != 1)
+    hours_vary <- any(lubridate::hour(times) != 0)
     sprintf(
       '%s/%s/%s/%s',
       if (min(years) == max(years)) {
@@ -224,68 +311,13 @@ write_basis_runs <- function(basis_runs, base_directory, optimise = TRUE) {
   }
 }
 
-.split_run_by_period <- function(
-  run,
-  max_length = lubridate::period(1, 'years')
-) {
-  start_date <- run$configuration$main$simulation$start_date
-  end_date <- run$configuration$main$simulation$end_date
-
-  if (start_date + max_length >= end_date) {
-    return(list(run))
+.scaling_grid_cre <- function(grid) {
+  if (inherits(grid, 'rle_grid_data')) {
+    grid_dimnames <- attr(grid, 'dimension_names')
+  } else {
+    grid_dimnames <- dimnames(grid)
   }
+  has_time_grid <- 'time' %in% names(grid_dimnames)
 
-  current_run <- run
-  current_start_date <- start_date
-  index <- 1L
-  runs <- NULL
-  while (current_start_date < end_date) {
-    current_run$configuration$main$simulation$start_date <- current_start_date
-    current_run$configuration$main$simulation$end_date <- min(
-      end_date,
-      current_start_date + max_length
-    )
-    previous_run_name <- NULL
-    if (index > 1L) {
-      previous_run_name <- current_run$name
-
-      current_run$configuration$symlinks[
-        startsWith(
-          names(current_run$configuration$symlinks),
-          'GEOSChem.Restart.'
-        )
-      ] <- NULL
-      current_run$configuration$files[
-        startsWith(
-          names(current_run$configuration$files),
-          'GEOSChem.Restart.'
-        )
-      ] <- NULL
-      restart_filename <- format(
-        current_start_date,
-        'GEOSChem.Restart.%Y%m%d_%H%Mz.nc4'
-      )
-      current_run$configuration$symlinks[[file.path(
-        'Restarts',
-        basename(restart_filename)
-      )]] <- file.path(
-        '..',
-        current_run$name,
-        'Restarts',
-        restart_filename
-      )
-    }
-    current_run$name <- sprintf('%s_split%02d', run$name, index)
-    current_run$split <- list(
-      parent = run$name,
-      previous = previous_run_name
-    )
-
-    runs <- c(runs, list(current_run))
-
-    current_start_date <- current_start_date + max_length
-    index <- index + 1L
-  }
-
-  runs
+  if (has_time_grid) 'RF' else 'C'
 }

@@ -6,17 +6,7 @@
   base_species_database_entry,
   max_species_per_run = 12
 ) {
-  max_scale_factor_id <- if (length(base_run$hemco$scale_factors) > 0) {
-    max(sapply(
-      base_run$hemco$scale_factors,
-      getElement,
-      'id'
-    ))
-  } else {
-    0
-  }
-
-  all_start_times <- .basis_function_start_times(basis, base_run)
+  all_start_times <- do.call(c, lapply(basis$basis_functions, getElement, 'start_time'))
 
   start_times <- sort(unique(all_start_times))
   if (missing(groups)) {
@@ -52,11 +42,29 @@
     }
   )
 
+  flux_field_names <- sapply(basis$flux_fields, getElement, 'name')
+  flux_fields_by_name <- basis$flux_fields
+  names(flux_fields_by_name) <- flux_field_names
+
+  scaling_grid_names <- sapply(basis$scaling_grids, getElement, 'name')
+  scaling_grids_by_name <- basis$scaling_grids
+  names(scaling_grids_by_name) <- scaling_grid_names
+
   c(list(list(
     name = 'base',
     configuration = base_run
   )), do.call(c, lapply(seq_len(nlevels(split_groups)), function(index) {
     parts <- by_split_groups[[index]]
+
+    split_group_end_date <- max(do.call(c, lapply(parts, function(run_basis_functions) {
+      do.call(c, lapply(run_basis_functions, function(basis_function) {
+        if (is.character(basis_function) && basis_function == 'background') {
+          return(as.POSIXct(NA, tz = 'UTC'))
+        } else {
+          basis_function$end_time
+        }
+      }))
+    })), na.rm = TRUE)
 
     lapply(seq_along(parts), function(part_index) {
       configuration <- base_run
@@ -72,6 +80,7 @@
       )
 
       configuration$main$simulation$start_date <- split_start_times[[index]]
+      configuration$main$simulation$end_date <- split_group_end_date
       configuration$main$operations$transport$transported_species <- tracer_names
       species_database_input <- list()
       for (tracer_index in seq_along(tracer_names)) {
@@ -85,27 +94,36 @@
       }
       configuration$species_database <- geoschem_species_database(species_database_input)
 
-      base_emission_fields <- list()
-      for (tracer_index in seq_along(run_basis_functions)) {
-        basis_function <- run_basis_functions[[tracer_index]]
-        if (is.character(basis_function) && basis_function == 'background') next
-        for (base_emission_field in base_run$hemco$base_emissions) {
-          if (base_emission_field$name %in% basis_function$fields) {
-            base_emission_field$name <- sprintf(
-              '%s_%03d',
-              base_emission_field$name,
-              tracer_index
-            )
-            base_emission_field$species <- tracer_names[tracer_index]
-            base_emission_field$scale_factors <- c(
-              base_emission_field$scale_factors,
-              max_scale_factor_id + tracer_index
-            )
-
-            base_emission_fields <- c(base_emission_fields, list(base_emission_field))
-          }
+      scaling_grid_names <- unique(do.call(c, lapply(run_basis_functions, function(basis_function) {
+        if (is.character(basis_function) && basis_function == 'background') {
+          return(character(0))
         }
+        basis_function$scaling_grid_name
+      })))
+
+      scale_factors <- lapply(seq_along(scaling_grid_names), function(i) {
+        scaling_grid_name <- scaling_grid_names[[i]]
+        scaling_grid <- scaling_grids_by_name[[scaling_grid_name]]
+
+        hemco_scale_factor(
+          id = hemco_max_scale_factor_id(configuration$hemco) + i,
+          name = scaling_grid$name,
+          source_file = scaling_grid$source_file,
+          source_variable = scaling_grid$source_variable,
+          source_time = scaling_grid$source_time,
+          cre = scaling_grid$cre,
+          source_dimension = 'xy',
+          source_unit = '1',
+          operator = 1
+        )
+      })
+      names(scale_factors) <- scaling_grid_names
+
+      for (scale_factor in scale_factors) {
+        configuration$hemco$scale_factors[[length(configuration$hemco$scale_factors) + 1]] <- scale_factor
       }
+
+      base_emission_fields <- list()
       for (base_emission_field in base_run$hemco$base_emissions) {
         if (base_emission_field$name %in% locked_base_emissions) {
           base_emission_fields <- c(base_emission_fields, list(base_emission_field))
@@ -120,40 +138,22 @@
           )
         )
       )
-
       for (tracer_index in seq_along(run_basis_functions)) {
         basis_function <- run_basis_functions[[tracer_index]]
-
         if (is.character(basis_function) && basis_function == 'background') next
 
-        scaling_grid <- basis_function$scaling_grid
-
-        filename <- sprintf('basis-scaling-%03d.nc', tracer_index)
-        has_time_grid <- 'time' %in% names(dimnames(scaling_grid))
-        scaling_scale_factor <- hemco_scale_factor(
-          id = max_scale_factor_id + tracer_index,
-          name = sprintf('BASISSCALE_%03d', tracer_index),
-          source_file = filename,
-          source_variable = 'value',
-          # TODO(mgnb): do better than this
-          source_time = if (has_time_grid) {
-            .times_to_hemco_source_time(attr(scaling_grid, 'time'))
-          } else {
-            sprintf(
-              '%d/1/1/0',
-              lubridate::year(configuration$main$simulation$start_date)
-            )
-          },
-          cre = if (has_time_grid) 'RF' else 'C',
-          source_dimension = 'xy',
-          source_unit = '1',
-          operator = 1
-        )
-        configuration$hemco$scale_factors[[
-          sprintf('scaling_%03d', tracer_index)
-        ]] <- scaling_scale_factor
-
-        configuration$files[[filename]] <- scaling_grid
+        for (flux_field_name in basis_function$flux_field_names) {
+          flux_field <- flux_fields_by_name[[flux_field_name]]
+          flux_field$name <- basis_function$name
+          configuration$hemco <- add_flux_field_to_hemco(
+            configuration$hemco,
+            flux_field,
+            species = tracer_names[tracer_index],
+            scale_factors = scale_factors[[basis_function$scaling_grid_name]]$id,
+            category = -1,
+            hierarchy = -1
+          )
+        }
       }
 
       configuration$hemco_diagnostics <- do.call(hemco_diagnostics, lapply(

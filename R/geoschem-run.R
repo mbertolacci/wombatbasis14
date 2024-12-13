@@ -134,3 +134,50 @@ write_geoschem_run <- function(run_configuration, run_directory) {
 
   invisible(NULL)
 }
+
+#' @export
+hemco_max_scale_factor_id <- function(hemco) {
+  if (length(hemco$scale_factors) > 0) {
+    max(sapply(
+      hemco$scale_factors,
+      getElement,
+      'id'
+    ))
+  } else {
+    0
+  }
+}
+
+#' @export
+add_flux_field_to_hemco <- function(hemco, flux_field, ...) {
+  base_emissions_entry <- do.call(
+    hemco_base_emission_field,
+    c(flux_field[c(
+      'name',
+      'source_file',
+      'source_variable',
+      'source_time',
+      'cre',
+      'source_dimension',
+      'source_unit'
+    )], list(...)
+  ))
+  if (flux_field$multiply_by != 1) {
+    max_scale_factor_id <- hemco_max_scale_factor_id(hemco)
+    multiply_by_scale_factor <- hemco_scale_factor(
+      id = max_scale_factor_id + 1,
+      name = sprintf('%s_MULTIPLY_BY', flux_field$name),
+      source_file = '-1.0',
+      source_variable = NULL,
+      source_time = '2000/1/1/0',
+      cre = 'C',
+      source_dimension = 'xy',
+      source_unit = '1',
+      operator = 1
+    )
+    hemco$scale_factors[[length(hemco$scale_factors) + 1]] <- multiply_by_scale_factor
+    base_emissions_entry$scale_factors <- c(base_emissions_entry$scale_factors, multiply_by_scale_factor$id)
+  }
+  hemco$base_emissions[[length(hemco$base_emissions) + 1]] <- base_emissions_entry
+  hemco
+}
