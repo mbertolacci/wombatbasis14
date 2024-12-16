@@ -7,9 +7,10 @@ flux_field <- function(
   cre,
   source_dimension,
   source_unit,
+  source_extra_dimensions = NULL,
   multiply_by = 1
 ) {
-  structure(list(
+  output <- structure(list(
     name = name,
     source_file = source_file,
     source_variable = source_variable,
@@ -19,6 +20,10 @@ flux_field <- function(
     source_unit = source_unit,
     multiply_by = multiply_by
   ), class = 'flux_field')
+  if (!is.null(source_extra_dimensions)) {
+    output$source_extra_dimensions <- source_extra_dimensions
+  }
+  output
 }
 
 #' @export
@@ -28,7 +33,7 @@ print.flux_field <- function(x, ...) {
 
 #' @export
 flux_basis <- function(
-  structure,
+  formula,
   start_time,
   end_time,
   basis_parts,
@@ -43,7 +48,7 @@ flux_basis <- function(
   })
 
   if (missing(basis_parts)) {
-    basis_parts <- .basis_parts_from_structure(structure)
+    basis_parts <- .basis_parts_from_formula(formula)
   }
   part_names <- sapply(basis_parts, getElement, 'name')
   stopifnot(length(unique(part_names)) == length(part_names))
@@ -226,8 +231,8 @@ read_flux_basis <- function(path) {
   output
 }
 
-.basis_parts_from_structure <- function(structure) {
-  variables <- attr(terms(structure), 'variables')
+.basis_parts_from_formula <- function(formula) {
+  variables <- attr(terms(formula), 'variables')
   part_number <- 1
   basis_parts <- lapply(
     variables[2 : length(variables)],

@@ -162,6 +162,18 @@ add_flux_field_to_hemco <- function(hemco, flux_field, ...) {
       'source_unit'
     )], list(...)
   ))
+  if (!is.null(flux_field$source_extra_dimensions)) {
+    x <- flux_field$source_extra_dimensions
+    if (length(x) > 1) {
+      stop('Only one source extra dimension is currently supported')
+    }
+    base_emissions_entry$source_dimension <- sprintf(
+      '%s+"%s=%s"',
+      flux_field$source_dimension,
+      names(x),
+      x[[1]]
+    )
+  }
   if (flux_field$multiply_by != 1) {
     max_scale_factor_id <- hemco_max_scale_factor_id(hemco)
     multiply_by_scale_factor <- hemco_scale_factor(
