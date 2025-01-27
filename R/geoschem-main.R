@@ -196,11 +196,13 @@ as.list.geoschem_operations_settings <- function(x, .envir = parent.frame(), ...
 #' @export
 geoschem_extra_diagnostics_settings <- function(
   obspack = list(activate = FALSE),
-  planeflight = list(activate = FALSE)
+  planeflight = list(activate = FALSE),
+  obsoperator = list(activate = FALSE)
 ) {
   structure(list(
     obspack = obspack,
-    planeflight = planeflight
+    planeflight = planeflight,
+    obsoperator = obsoperator
   ), class = 'geoschem_extra_diagnostics_settings')
 }
 
@@ -208,7 +210,8 @@ geoschem_extra_diagnostics_settings <- function(
 as.list.geoschem_extra_diagnostics_settings <- function(x, .envir = parent.frame(), ...) {
   output <- .glue_recursive(list(
     obspack = x$obspack,
-    planeflight = x$planeflight
+    planeflight = x$planeflight,
+    obsoperator = x$obsoperator
   ), .envir = .envir)
   class(output) <- NULL
   output
