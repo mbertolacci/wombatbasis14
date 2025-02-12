@@ -95,7 +95,8 @@ write_nc_grid_data <- function(
   filename,
   variable_name = 'value',
   variable_unit = '1',
-  variable_longname = 'Scaling factor'
+  variable_longname = 'Scaling factor',
+  base_time = lubridate::ymd_hms('2000-01-01 00:00:00')
 ) {
   if (inherits(x, 'rle_grid_data')) {
     x <- decode_rle_grid(x)
@@ -107,22 +108,17 @@ write_nc_grid_data <- function(
     if (name == 'time') {
       # Convert date/datetime objects to offsets
       if (all(lubridate::minute(values) == 0)) {
-        if (all(lubridate::hour(values) == 0)) {
-          resolution <- 'days'
-        } else {
-          resolution <- 'hours'
-        }
+        resolution <- 'hours'
       } else {
         resolution <- 'minutes'
       }
-      base_time <- min(lubridate::floor_date(values, 'day'))
       time_unit <- sprintf(
         '%s since %s',
         resolution,
         format(base_time, format = '%Y-%m-%d 00:00:00')
       )
       values <- as.integer(round(as.double(
-        values - base_time,
+        as.POSIXct(values) - base_time,
         units = resolution
       )))
     } else {
