@@ -113,7 +113,7 @@ write_nc_grid_data <- function(
         resolution <- 'minutes'
       }
       time_unit <- sprintf(
-        '%s since %s',
+        '%s since %s UTC',
         resolution,
         format(base_time, format = '%Y-%m-%d 00:00:00')
       )
