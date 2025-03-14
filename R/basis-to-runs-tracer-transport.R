@@ -150,8 +150,8 @@
             flux_field,
             species = tracer_names[tracer_index],
             scale_factors = scale_factors[[basis_function$scaling_grid_name]]$id,
-            category = -1,
-            hierarchy = -1
+            category = 1,
+            hierarchy = 1
           )
         }
       }
