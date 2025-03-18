@@ -120,7 +120,7 @@ write_basis_runs <- function(basis_runs, base_directory, optimise = TRUE) {
         'Restarts',
         basename(restart_filename)
       )]] <- file.path(
-        '..',
+        '../..',
         current_run$name,
         'Restarts',
         restart_filename
